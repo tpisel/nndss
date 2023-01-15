@@ -1,0 +1,91 @@
+---
+title: "NNDSS Data Analysis"
+output: html_notebook
+---
+
+# NNDSS Data Analysis
+
+Exploratory Analysis of the National Notifiable Diseases Surveillance System (NNDSS) public dataset – [influenza (laboratory confirmed)](https://www.health.gov.au/resources/publications/national-notifiable-diseases-surveillance-system-nndss-public-dataset-influenza-laboratory-confirmed?language=en)
+
+**Publication date:** September 2022
+
+
+
+```{r}
+
+library(tidyverse)
+library(lubridate)
+library(tsibble)
+library(fable)
+library(feasts)
+
+lubridate.week.start = 1
+
+source("scripts/ingest.R")
+data <- ingest()
+
+head(data)
+
+```
+**6 Variables**
+
+- Week `date, ending on the Friday`
+- State `NSW, NT, Qld, SA, Tas, Vic, WA`
+- Age `bucketed in 5 year groups`
+- Sex ` Male, Female, Unknown`
+- Indigenous `Not available, Indigenous, Non-Indigenous, Unknown`
+- Type `A(H1N1)pdm09, A(unsubtyped), A(H3N2), B, A and B, Untyped, C, A(H1N1)`
+
+*Note: `A(H3N2)` are largely derived from PCR results reported as A(H3). Based on nationally available subtyping and characterisation data, these cases are assumed to be A(H3N2). `A and B` denotes a co-infection of both influenza A and influenza B viruses.*
+
+## Caveats from source:
+
+- These notification data represent only a proportion of the total cases occurring in the community, that is, only those cases for which health care was sought, a test conducted and a diagnosis made.
+- In interpreting these data it is important to note that changes in notifications over time may not solely reflect changes in disease prevalence or incidence. Changes in testing policies; screening programs including the preferential testing of high-risk populations; the use of less invasive and more sensitive diagnostic tests; and periodic awareness campaigns, may influence the number of notifications that occur annually. 
+- No ACT data
+- Social distancing measures due to COVID causes discontinuities
+
+[See full disclosure](https://www.health.gov.au/sites/default/files/documents/2022/09/national-notifiable-diseases-surveillance-system-nndss-public-dataset-influenza-laboratory-confirmed-caveats.pdf)
+
+
+## Basic EDA
+
+```{r}
+data %>% count(State)
+data %>% count(Age)
+data %>% count(Sex)
+data %>% count(Type)
+
+```
+
+
+*Thoughts*
+
+- May want to normalise each state by the population at the time if doing statewise comparisons
+- May want to cut off after 2020, due to covid-era capture issues
+- Clear seasonality (ETS?)
+
+```{r}
+# accumulate for a tsibble
+
+data %>%
+  filter(Week < as.Date("2020-01-01 UTC")) %>%
+  select(Week:Sex) %>% 
+  group_by(Week,State,Age,Sex) %>% 
+  summarise(Cases = n()) %>% ungroup() %>% 
+  as_tsibble(index = Week, key = c(State, Age, Sex), regular = FALSE) -> datats
+
+datats %>% summarise(Cases = sum(Cases)) %>% autoplot()
+
+```
+Decompose by year to show seasonality:
+
+```{r}
+datats %>%
+  summarise(Cases = sum(Cases)) %>% 
+  gg_season()
+```
+
+
+
+
