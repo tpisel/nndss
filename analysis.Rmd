@@ -10,15 +10,21 @@ Exploratory Analysis of the National Notifiable Diseases Surveillance System (NN
 **Publication date:** September 2022
 
 
+## Setup
 
 ```{r}
 
+library(igraph)
+library(visNetwork)
 library(tidyverse)
+library(GGally)
 library(lubridate)
 library(tsibble)
 library(fable)
 library(feasts)
-library(GGally)
+
+
+
 
 lubridate.week.start = 1
 
@@ -91,15 +97,48 @@ datats %>% group_by(State) %>%
   summarise(Cases = sum(Cases)) %>% 
   gg_season() + labs(x = "Month")
 ```
+Fix the periodicity for `tsibble` and decompose into STL elements:
 
-## Hypothesis
+```{r}
+data %>%
+  filter(Week < as.Date("2020-01-01 UTC")) %>%
+  group_by(Week) %>% 
+  summarise(Cases = n()) %>%
+  transmute(t = as.Date(floor_date(Week, unit = "1 week")), Cases) %>% 
+  as_tsibble(index = t) -> data_for_model
+  
+data_for_model %>% 
+  model(feasts::STL(Cases)) %>% 
+  components() %>%
+  autoplot()
+```
+
+
+
+
+
+## Hypotheses
+
+
+**1.**
 
 Adjacent states are more likely to have correlated case patterns
 
 More precisely, the correlation is downstream of cross-border travel volume
 
+**2.** 
 
-```{r}
+Flu spread is directly related to the temperature
+
+**3.**
+
+It's possible to predict the total volume (number of cases in a year) with some accuracy from monitoring the early growth rate
+
+
+
+### Hypothesis 1 - interstate correlations
+
+```{r, message=FALSE}
 datats %>%
   group_by(State, Sex) %>%
   filter(Sex != "Unknown") %>% 
@@ -121,8 +160,6 @@ statedatats <- datats %>%
 Adjacency matrix:
 
 ```{r}
-library(igraph)
-library(visNetwork)
 
 
 adjacencies <- matrix(c("NSW","Qld",
@@ -144,12 +181,110 @@ visIgraph(adjacencies)
 
 
 ```{r}
-statedatats %>% as.data.frame() %>% select(2:8) %>% cor()
+statedatats %>% as.data.frame() %>% select(2:8) %>% cor() -> a
+adjacencies %>% as_adjacency_matrix() -> b
+
+# need to correct order of matrix b (not alphabetical):
+#     NSW Qld Vic SA NT WA Tas
+# NSW   .   1   1  1  .  .   .
+
+order_v <- match(colnames(a),colnames(b))
+b <- b[order_v,order_v]
+b[lower.tri(b)] <- 0 
+
+# colnames(a) == colnames(b)
+
+b_inv <- b
+b_inv[] <- 0
+b_inv[upper.tri(b)&b==0] <- 1
+
+corr_comparison <- rbind(
+  tibble(adjacency = "adjacent", correlation = (a*b)[b!=0]),
+  tibble(adjacency = "non-adjacent", correlation = (a*b_inv)[b_inv!=0]))
+  
+#fisher 
+
+corr_comparison$correlation <- corr_comparison$correlation %>% atanh()
+
+corr_comparison %>%
+  ggplot(aes(x = adjacency, y = correlation)) +
+  geom_boxplot() +
+  geom_jitter(alpha = 1, width = .2) + labs(y = "atanh(r)")
+
+
+```
+
+To be robust, would likely need to weight correlations in these comparisons by a relevant metric, like population size (or a pair-wise flow, like travel). Australia Trade and Investment has detailed traveller-per-state [data](https://www.tra.gov.au/data-and-research) but not the pair-wise flows. The ABS has [internal migration flows](https://www.abs.gov.au/statistics/people/population/regional-internal-migration-estimates-provisional/latest-release), but this may be an imperfect proxy for actual trips.
+
+
+
+
+
+### Hypothesis 2 - temperature
+
+Need weekly temperature data by state.
+
+Most population lives in the major city, so using the weather in the capital.
+
+
+desired period:
+
+```{r}
+c(min(data$Week),max(data$Week))
+
+
+
+```
+
+
+```{r}
+library(httr)
+
+# "https://archive-api.open-meteo.com/v1/archive?latitude=-33.87&longitude=151.21&start_date=2008-01-04&end_date=2021-12-31&daily=temperature_2m_max,temperature_2m_min&timezone=Australia%2FSydney"
+
+base_url <- "https://archive-api.open-meteo.com/v1/archive"
+
+
+queries <- list(latitude = -33.87,
+                longitude = 151.21,
+                start_date = min(data$Week),
+                end_date = max(data$Week),
+                daily = "temperature_2m_max",
+                timezone = "Australia/Sydney")
+
+modify_url(base_url, query = queries)
+
+
+
+#weather_data <- GET(str)
+#weather_data
+
+
+
 ```
 
 
 
 
+
+
+
+### Hypothesis 3 - early growth rates
+
+Taking just the seasonal component of the ETL model shows a predictable ramp-up:
+
+```{r}
+
+data_for_model %>% 
+  model(feasts::STL(Cases)) %>% 
+  components() %>%
+  gg_season(y = season_year) + labs(x = "Month")
+
+```
+
+
+
+//
 
 
 
