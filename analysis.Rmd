@@ -18,6 +18,7 @@ library(lubridate)
 library(tsibble)
 library(fable)
 library(feasts)
+library(GGally)
 
 lubridate.week.start = 1
 
@@ -83,9 +84,83 @@ Decompose by year to show seasonality:
 ```{r}
 datats %>%
   summarise(Cases = sum(Cases)) %>% 
-  gg_season()
+  gg_season() + labs(x = "Month")
+```
+```{r}
+datats %>% group_by(State) %>% 
+  summarise(Cases = sum(Cases)) %>% 
+  gg_season() + labs(x = "Month")
+```
+
+## Hypothesis
+
+Adjacent states are more likely to have correlated case patterns
+
+More precisely, the correlation is downstream of cross-border travel volume
+
+
+```{r}
+datats %>%
+  group_by(State, Sex) %>%
+  filter(Sex != "Unknown") %>% 
+  summarise(Cases = sum(Cases)) %>%
+  pivot_wider(values_from = Cases, names_from = State, values_fill = 0) %>%
+  GGally::ggpairs(columns = 3:9, ggplot2::aes(colour = Sex, alpha = 1/50))
+```
+Cross-correlations
+
+```{r}
+statedatats <- datats %>%
+  group_by(State) %>%
+  summarise(Cases = sum(Cases)) %>%
+  pivot_wider(values_from = Cases, names_from = State, values_fill = 0)
+  GGally::ggcorr(statedatats, columns = 2:8)
 ```
 
 
+Adjacency matrix:
+
+```{r}
+library(igraph)
+library(visNetwork)
+
+
+adjacencies <- matrix(c("NSW","Qld",
+         "NSW","Vic",
+         "NSW","SA",
+         "NT","WA",
+         "NT","SA",
+         "NT","Qld",
+         "Qld","SA",
+         "SA","Vic",
+         "SA","WA",
+         "Tas","Vic"),
+       ncol = 2, byrow = TRUE) %>% 
+  graph_from_edgelist(directed = FALSE)
+
+visIgraph(adjacencies)
+
+```
+
+
+```{r}
+statedatats %>% as.data.frame() %>% select(2:8) %>% cor()
+```
+
+
+
+
+
+
+
+corr by population?
+
+```{r}
+datats %>%
+  group_by(State) %>%
+  summarise(Cases = sum(Cases)) %>%
+  lm(Cases ~ State, data = .)
+
+```
 
 
