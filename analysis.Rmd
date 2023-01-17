@@ -22,6 +22,9 @@ library(lubridate)
 library(tsibble)
 library(fable)
 library(feasts)
+library(tidygeocoder)
+library(httr)
+library(slider)
 
 
 
@@ -227,43 +230,102 @@ Need weekly temperature data by state.
 Most population lives in the major city, so using the weather in the capital.
 
 
-desired period:
 
-```{r}
-c(min(data$Week),max(data$Week))
+**Ingest**
 
+For each state, we want to get a vector of the average maximum temperature in the capital each day, and join it with the cases data.
 
+To do this, we get the co-ordinates of each capital and feed it a weather API, which returns a temperature vector of daily maxima.
 
-```
-
+As our case data is weekly, we then compute a 7-day moving average to use.
 
 ```{r}
 library(httr)
 
 # "https://archive-api.open-meteo.com/v1/archive?latitude=-33.87&longitude=151.21&start_date=2008-01-04&end_date=2021-12-31&daily=temperature_2m_max,temperature_2m_min&timezone=Australia%2FSydney"
 
-base_url <- "https://archive-api.open-meteo.com/v1/archive"
+# get co-ordinates of capitals
 
+locations <- tibble(
+  state = c("NSW",    "NT",     "Qld",      "SA",       "Tas",    "Vic",       "WA"),
+  city  = c("Sydney", "Darwin", "Brisbane", "Adelaide", "Hobart", "Melbourne", "Perth")
+)
 
-queries <- list(latitude = -33.87,
-                longitude = 151.21,
-                start_date = min(data$Week),
-                end_date = max(data$Week),
-                daily = "temperature_2m_max",
-                timezone = "Australia/Sydney")
+get_temps = function(city) {
+  coords <- geo(city = city, country = "Australia")
+  
+  base_url <- "https://archive-api.open-meteo.com/v1/archive"
+  
+  queries <- list(
+    latitude = coords$lat,
+    longitude = coords$long,
+    start_date = min(datats$Week),
+    end_date = max(datats$Week),
+    daily = "temperature_2m_max",
+    timezone = "Australia/Sydney")
+  
+  weather_data <- GET(modify_url(base_url, query = queries))
+  
+  output <- tibble(
+    date = content(weather_data)$daily$time,
+    temp = content(weather_data)$daily$temperature_2m_max
+  )
+  
+  output %>% mutate(
+    city = city,
+    date = date %>% unlist() %>% as_date(),
+    temp = temp %>% unlist()
+    )
+}
 
-modify_url(base_url, query = queries)
+temp_data_list <- map(locations$city, get_temps)
 
+temp_data <- bind_rows(temp_data_list) %>%
+  left_join(locations, by = "city") %>% 
+  mutate(
+    avg_temp = slider::slide_dbl(temp, mean,
+                .before = 3, .after = 3, .complete = TRUE))
 
+case_data <- data %>%
+  filter(Week < as.Date("2020-01-01 UTC")) %>%
+  group_by(Week,State) %>% 
+  summarise(cases = n()) %>%
+  transmute(date = as.Date(floor_date(Week, unit = "1 week")), state = State, cases)
 
-#weather_data <- GET(str)
-#weather_data
+combined_data <- left_join(case_data,temp_data) %>%
+  ungroup() %>%
+  select(date,state,cases,avg_temp) %>%
+  drop_na(avg_temp) %>% 
+  as_tsibble(index = date,key = c(state)) %>% 
+  fill_gaps()
 
-
+combined_data %>% head()
 
 ```
 
 
+**Modelling**
+
+linear model on vic
+
+```{r}
+combined_data %>% 
+  filter(state == "Vic") %>% 
+  model(TSLM(cases ~ avg_temp)) %>% 
+  report()
+
+
+```
+
+looks to lag from inspection, maybe an ARIMA?
+
+
+
+```{r}
+
+
+
+```
 
 
 
