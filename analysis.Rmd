@@ -31,7 +31,7 @@ library(slider)
 
 lubridate.week.start = 1
 
-source("scripts/ingest.R")
+source("scripts/ingest.R") # script to read/format the excel doc
 data <- ingest()
 
 head(data)
@@ -61,10 +61,10 @@ head(data)
 ## Basic EDA
 
 ```{r}
-data %>% count(State)
+data %>% count(Type)
 data %>% count(Age)
 data %>% count(Sex)
-data %>% count(Type)
+data %>% count(State)
 
 ```
 
