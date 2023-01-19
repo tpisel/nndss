@@ -1,6 +1,10 @@
 ---
 title: "NNDSS Data Analysis"
-output: html_notebook
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+  html_notebook: default
 ---
 
 # NNDSS Data Analysis
@@ -12,7 +16,7 @@ Exploratory Analysis of the National Notifiable Diseases Surveillance System (NN
 
 ## Setup
 
-```{r}
+```{r, message=FALSE}
 
 library(igraph)
 library(visNetwork)
@@ -60,12 +64,9 @@ head(data)
 
 ## Basic EDA
 
-```{r}
+```{r, message=FALSE}
 data %>% count(Type)
-data %>% count(Age)
-data %>% count(Sex)
 data %>% count(State)
-
 ```
 
 
@@ -75,7 +76,7 @@ data %>% count(State)
 - May want to cut off after 2020, due to covid-era capture issues
 - Clear seasonality (ETS?)
 
-```{r}
+```{r, message=FALSE}
 # accumulate for a tsibble
 
 data %>%
@@ -90,19 +91,19 @@ datats %>% summarise(Cases = sum(Cases)) %>% autoplot()
 ```
 Decompose by year to show seasonality:
 
-```{r}
+```{r, message=FALSE}
 datats %>%
   summarise(Cases = sum(Cases)) %>% 
   gg_season() + labs(x = "Month")
 ```
-```{r}
+```{r, message=FALSE}
 datats %>% group_by(State) %>% 
   summarise(Cases = sum(Cases)) %>% 
   gg_season() + labs(x = "Month")
 ```
 Fix the periodicity for `tsibble` and decompose into STL elements:
 
-```{r}
+```{r, message=FALSE}
 data %>%
   filter(Week < as.Date("2020-01-01 UTC")) %>%
   group_by(Week) %>% 
@@ -151,7 +152,7 @@ datats %>%
 ```
 Cross-correlations
 
-```{r}
+```{r, message=FALSE}
 statedatats <- datats %>%
   group_by(State) %>%
   summarise(Cases = sum(Cases)) %>%
@@ -162,7 +163,7 @@ statedatats <- datats %>%
 
 Adjacency matrix:
 
-```{r}
+```{r, message=FALSE}
 
 
 adjacencies <- matrix(c("NSW","Qld",
@@ -183,7 +184,7 @@ visIgraph(adjacencies)
 ```
 
 
-```{r}
+```{r, message=FALSE}
 statedatats %>% as.data.frame() %>% select(2:8) %>% cor() -> a
 adjacencies %>% as_adjacency_matrix() -> b
 
@@ -239,7 +240,7 @@ To do this, we get the co-ordinates of each capital and feed it a weather API, w
 
 As our case data is weekly, we then compute a 7-day moving average to use.
 
-```{r}
+```{r, message=FALSE}
 library(httr)
 
 # "https://archive-api.open-meteo.com/v1/archive?latitude=-33.87&longitude=151.21&start_date=2008-01-04&end_date=2021-12-31&daily=temperature_2m_max,temperature_2m_min&timezone=Australia%2FSydney"
@@ -317,17 +318,7 @@ combined_data %>%
 
 ```
 
-looks to lag from inspection, maybe an ARIMA?
-
-
-
-```{r}
-
-
-
-```
-
-
+This looks to lag from inspection, maybe an autoregression?
 
 
 
@@ -344,20 +335,7 @@ data_for_model %>%
 
 ```
 
+Ramp up seems already evident in July, i.e. total_cases ~ cases[July]
 
-
-//
-
-
-
-corr by population?
-
-```{r}
-datats %>%
-  group_by(State) %>%
-  summarise(Cases = sum(Cases)) %>%
-  lm(Cases ~ State, data = .)
-
-```
-
+.. to explore further
 
